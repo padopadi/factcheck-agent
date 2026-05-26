@@ -35,9 +35,9 @@ def extract_text_from_pdf(uploaded_file) -> str:
 def call_gemini(prompt: str, gemini_key: str) -> str:
     """Try multiple Gemini models until one works."""
     models = [
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro-latest",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
     ]
     last_error = ""
     for model in models:
