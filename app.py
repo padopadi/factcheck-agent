@@ -37,7 +37,7 @@ def call_gemini(prompt: str, gemini_key: str) -> str:
     models = [
         "gemini-2.0-flash",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "gemini-1.5-flash",
     ]
     last_error = ""
     for model in models:
