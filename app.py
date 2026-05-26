@@ -34,15 +34,17 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 def call_gemini(prompt: str, gemini_key: str) -> str:
     """Try multiple Gemini models until one works."""
+    # (model_name, api_version)
     models = [
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash",
+        ("gemini-2.0-flash", "v1beta"),
+        ("gemini-1.5-flash", "v1beta"),
+        ("gemini-1.0-pro", "v1"),
+        ("gemini-pro", "v1"),
     ]
     last_error = ""
-    for model in models:
+    for model, version in models:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+            url = f"https://generativelanguage.googleapis.com/{version}/models/{model}:generateContent?key={gemini_key}"
             body = {"contents": [{"parts": [{"text": prompt}]}]}
             r = requests.post(url, json=body, timeout=30)
             data = r.json()
@@ -58,14 +60,12 @@ def call_gemini(prompt: str, gemini_key: str) -> str:
 
 def extract_claims(text: str, gemini_key: str) -> list:
     prompt = f"""
-You are a fact-checking assistant. Read the text below and extract ALL specific, verifiable claims.
-Focus on: statistics, percentages, dates, financial figures, scientific facts, named data points.
+You are a fact-checking assistant. Extract ALL specific verifiable claims from the text.
+Focus on: statistics, percentages, dates, financial figures, scientific facts.
 
-For each claim return a JSON array. Each item must have:
-- "claim": the exact claim as a short sentence
+Return ONLY a raw JSON array. No markdown, no backticks. Each item:
+- "claim": the claim as a short sentence
 - "category": one of [Statistic, Date, Financial, Scientific, Other]
-
-Return ONLY a raw JSON array. No explanation, no markdown, no backticks.
 
 TEXT:
 {text[:8000]}
@@ -98,21 +98,15 @@ def google_search(query: str, api_key: str, cx: str) -> str:
 def verify_claim(claim: str, gemini_key: str, google_api_key: str, google_cx: str) -> dict:
     search_result = google_search(claim, google_api_key, google_cx)
     prompt = f"""
-You are a strict fact-checker with access to real-time web search results.
+You are a strict fact-checker.
 
 CLAIM: {claim}
-REAL-TIME WEB SEARCH RESULTS: {search_result}
+WEB SEARCH RESULTS: {search_result}
 
-Classify the claim as exactly one of:
-- "Verified" — matches current evidence
-- "Inaccurate" — partially wrong or outdated
-- "False" — clearly wrong or unsupported
+Classify as one of: Verified / Inaccurate / False
 
-Return ONLY a raw JSON object (no markdown, no backticks):
-- "verdict": Verified / Inaccurate / False
-- "explanation": 1-2 sentence explanation
-- "correct_fact": correct info if Inaccurate or False, else ""
-- "sources_used": brief mention of sources
+Return ONLY raw JSON (no markdown):
+{{"verdict": "Verified/Inaccurate/False", "explanation": "1-2 sentences", "correct_fact": "correct info or empty string", "sources_used": "source names"}}
 """
     raw = call_gemini(prompt, gemini_key)
     raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
@@ -154,7 +148,7 @@ with st.sidebar:
     google_api_key = st.text_input("Google Search API Key", type="password", placeholder="AIza... (from cloud console)")
     google_cx = st.text_input("Search Engine ID (cx)", placeholder="e.g. c383e856ec1b445f5")
     st.divider()
-    st.markdown("1. Upload PDF\n2. Gemini extracts claims\n3. Google verifies each\n4. Get verdicts")
+    st.markdown("**How it works:**\n1. Upload PDF\n2. Gemini extracts claims\n3. Google verifies each\n4. Get verdicts")
 
 uploaded_file = st.file_uploader("📄 Upload your PDF", type=["pdf"])
 all_keys_ready = gemini_key and google_api_key and google_cx
@@ -176,7 +170,8 @@ if uploaded_file and all_keys_ready:
             try:
                 claims = extract_claims(pdf_text, gemini_key)
             except Exception as e:
-                st.error(f"Gemini API error: {e}\n\n**Go to aistudio.google.com/app/apikey → create a brand new key in a NEW project → paste it here**")
+                st.error(f"❌ Gemini Error: {e}")
+                st.info("👉 Your Gemini key may have hit its free limit. Go to **aistudio.google.com/app/apikey** → Create a new key in a **NEW project** → paste it in Box 1 above.")
                 st.stop()
 
         if not claims:
@@ -186,7 +181,7 @@ if uploaded_file and all_keys_ready:
         st.success(f"Found **{len(claims)} claims** to verify!")
 
         results = []
-        progress = st.progress(0, text="Verifying claims...")
+        progress = st.progress(0, text="Verifying claims via Google Search...")
         for i, claim_obj in enumerate(claims):
             claim_text = claim_obj.get("claim", "")
             if claim_text:
