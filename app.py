@@ -220,7 +220,7 @@ if uploaded_file and api_key:
 
         # Configure Gemini
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
 
         # Step 1: Extract text
         with st.spinner("📖 Reading PDF..."):
