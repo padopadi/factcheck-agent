@@ -46,7 +46,7 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 def call_gemini(prompt: str, gemini_key: str) -> str:
     """Call Gemini using direct REST API — works with AI Studio keys."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     r = requests.post(url, json=body, timeout=30)
     data = r.json()
