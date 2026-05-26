@@ -9,21 +9,9 @@ st.set_page_config(page_title="FactCheck Agent", page_icon="🔍", layout="wide"
 
 st.markdown("""
 <style>
-    .verdict-verified {
-        background: linear-gradient(135deg, #1a3a2a, #0d2b1a);
-        border-left: 4px solid #00c853;
-        border-radius: 8px; padding: 16px; margin: 10px 0;
-    }
-    .verdict-inaccurate {
-        background: linear-gradient(135deg, #3a2a00, #2b1f00);
-        border-left: 4px solid #ffd600;
-        border-radius: 8px; padding: 16px; margin: 10px 0;
-    }
-    .verdict-false {
-        background: linear-gradient(135deg, #3a1a1a, #2b0d0d);
-        border-left: 4px solid #ff1744;
-        border-radius: 8px; padding: 16px; margin: 10px 0;
-    }
+    .verdict-verified { background: linear-gradient(135deg, #1a3a2a, #0d2b1a); border-left: 4px solid #00c853; border-radius: 8px; padding: 16px; margin: 10px 0; }
+    .verdict-inaccurate { background: linear-gradient(135deg, #3a2a00, #2b1f00); border-left: 4px solid #ffd600; border-radius: 8px; padding: 16px; margin: 10px 0; }
+    .verdict-false { background: linear-gradient(135deg, #3a1a1a, #2b0d0d); border-left: 4px solid #ff1744; border-radius: 8px; padding: 16px; margin: 10px 0; }
     .claim-text { color: #e0e0e0; font-size: 0.95rem; }
     .verdict-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85rem; margin-bottom: 8px; }
     .badge-verified { background-color: #00c853; color: #000; }
@@ -45,14 +33,27 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 
 def call_gemini(prompt: str, gemini_key: str) -> str:
-    """Call Gemini using direct REST API — works with AI Studio keys."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
-    r = requests.post(url, json=body, timeout=30)
-    data = r.json()
-    if "error" in data:
-        raise Exception(data["error"]["message"])
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    """Try multiple Gemini models until one works."""
+    models = [
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro-latest",
+    ]
+    last_error = ""
+    for model in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+            body = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=body, timeout=30)
+            data = r.json()
+            if "error" in data:
+                last_error = data["error"]["message"]
+                continue
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            last_error = str(e)
+            continue
+    raise Exception(f"All models failed. Last error: {last_error}")
 
 
 def extract_claims(text: str, gemini_key: str) -> list:
@@ -140,7 +141,7 @@ def render_result(item: dict):
 """, unsafe_allow_html=True)
 
 
-# ── UI ────────────────────────────────────────────────────────────────
+# ── UI ──────────────────────────────────────────────────────────────────────
 st.markdown("# 🔍 FactCheck Agent")
 st.markdown("**Upload a PDF** → AI extracts claims → Real-time Google Search verifies → Full report")
 st.divider()
@@ -152,14 +153,6 @@ with st.sidebar:
     st.divider()
     google_api_key = st.text_input("Google Search API Key", type="password", placeholder="AIza... (from cloud console)")
     google_cx = st.text_input("Search Engine ID (cx)", placeholder="e.g. c383e856ec1b445f5")
-    with st.expander("📖 How to get keys"):
-        st.markdown("""
-**Gemini Key:** aistudio.google.com/app/apikey
-
-**Google Search Key:** console.cloud.google.com → Credentials → Create API Key
-
-**Search Engine ID:** programmablesearchengine.google.com → your engine → copy the ID
-        """)
     st.divider()
     st.markdown("1. Upload PDF\n2. Gemini extracts claims\n3. Google verifies each\n4. Get verdicts")
 
@@ -183,7 +176,7 @@ if uploaded_file and all_keys_ready:
             try:
                 claims = extract_claims(pdf_text, gemini_key)
             except Exception as e:
-                st.error(f"Gemini API error: {e}\n\n**Make sure you're using the key from aistudio.google.com — NOT Google Cloud Console!**")
+                st.error(f"Gemini API error: {e}\n\n**Go to aistudio.google.com/app/apikey → create a brand new key in a NEW project → paste it here**")
                 st.stop()
 
         if not claims:
