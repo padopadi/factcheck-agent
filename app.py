@@ -32,27 +32,31 @@ def extract_text_from_pdf(uploaded_file) -> str:
     return text.strip()
 
 
-def call_claude(prompt: str, claude_key: str) -> str:
-    """Call Claude API (Anthropic) — very reliable."""
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": claude_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
-    body = {
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    r = requests.post(url, headers=headers, json=body, timeout=30)
-    data = r.json()
-    if "error" in data:
-        raise Exception(data["error"]["message"])
-    return data["content"][0]["text"]
+def call_gemini(prompt: str, gemini_key: str) -> str:
+    models = [
+        ("gemini-2.0-flash", "v1beta"),
+        ("gemini-1.5-flash", "v1beta"),
+        ("gemini-1.0-pro", "v1"),
+        ("gemini-pro", "v1"),
+    ]
+    last_error = ""
+    for model, version in models:
+        try:
+            url = f"https://generativelanguage.googleapis.com/{version}/models/{model}:generateContent?key={gemini_key}"
+            body = {"contents": [{"parts": [{"text": prompt}]}]}
+            r = requests.post(url, json=body, timeout=30)
+            data = r.json()
+            if "error" in data:
+                last_error = data["error"]["message"]
+                continue
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            last_error = str(e)
+            continue
+    raise Exception(f"All models failed. Last error: {last_error}")
 
 
-def extract_claims(text: str, claude_key: str) -> list:
+def extract_claims(text: str, gemini_key: str) -> list:
     prompt = f"""You are a fact-checking assistant. Extract ALL specific verifiable claims from the text.
 Focus on: statistics, percentages, dates, financial figures, scientific facts.
 
@@ -62,7 +66,7 @@ Return ONLY a raw JSON array. No markdown, no backticks. Each item:
 
 TEXT:
 {text[:8000]}"""
-    raw = call_claude(prompt, claude_key)
+    raw = call_gemini(prompt, gemini_key)
     raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
     try:
         claims = json.loads(raw)
@@ -87,7 +91,7 @@ def google_search(query: str, api_key: str, cx: str) -> str:
         return f"Search error: {e}"
 
 
-def verify_claim(claim: str, claude_key: str, google_api_key: str, google_cx: str) -> dict:
+def verify_claim(claim: str, gemini_key: str, google_api_key: str, google_cx: str) -> dict:
     search_result = google_search(claim, google_api_key, google_cx)
     prompt = f"""You are a strict fact-checker.
 
@@ -98,7 +102,7 @@ Classify as one of: Verified / Inaccurate / False
 
 Return ONLY raw JSON (no markdown):
 {{"verdict": "Verified/Inaccurate/False", "explanation": "1-2 sentences", "correct_fact": "correct info or empty string", "sources_used": "source names"}}"""
-    raw = call_claude(prompt, claude_key)
+    raw = call_gemini(prompt, gemini_key)
     raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
     try:
         result = json.loads(raw)
@@ -132,16 +136,16 @@ st.divider()
 
 with st.sidebar:
     st.header("⚙️ Configuration")
-    claude_key = st.text_input("Claude (Anthropic) API Key", type="password", placeholder="sk-ant-...")
-    st.markdown("[🔑 Get Claude API key here](https://console.anthropic.com/)")
+    gemini_key = st.text_input("Google Gemini API Key", type="password", placeholder="AIza... (from aistudio.google.com)")
+    st.markdown("[🔑 Get FREE Gemini key here](https://aistudio.google.com/app/apikey)")
     st.divider()
-    google_api_key = st.text_input("Google Search API Key", type="password", placeholder="AIza...")
+    google_api_key = st.text_input("Google Search API Key", type="password", placeholder="AIza... (from cloud console)")
     google_cx = st.text_input("Search Engine ID (cx)", placeholder="e.g. c383e856ec1b445f5")
     st.divider()
-    st.markdown("**How it works:**\n1. Upload PDF\n2. Claude AI extracts claims\n3. Google verifies each\n4. Get verdicts")
+    st.markdown("**How it works:**\n1. Upload PDF\n2. Gemini extracts claims\n3. Google verifies each\n4. Get verdicts")
 
 uploaded_file = st.file_uploader("📄 Upload your PDF", type=["pdf"])
-all_keys_ready = claude_key and google_api_key and google_cx
+all_keys_ready = gemini_key and google_api_key and google_cx
 
 if uploaded_file and all_keys_ready:
     if st.button("🚀 Run Fact-Check", type="primary", use_container_width=True):
@@ -156,12 +160,12 @@ if uploaded_file and all_keys_ready:
         with st.expander("📄 Extracted PDF Text (preview)"):
             st.text(pdf_text[:2000] + ("..." if len(pdf_text) > 2000 else ""))
 
-        with st.spinner("🧠 Identifying claims with Claude AI..."):
+        with st.spinner("🧠 Identifying claims with Gemini AI..."):
             try:
-                claims = extract_claims(pdf_text, claude_key)
+                claims = extract_claims(pdf_text, gemini_key)
             except Exception as e:
-                st.error(f"❌ Claude API Error: {e}")
-                st.info("👉 Get your free Claude API key at **console.anthropic.com** → paste it in Box 1")
+                st.error(f"❌ Gemini Error: {e}")
+                st.info("👉 Your key hit the free limit. Use a different Google account at **aistudio.google.com/app/apikey** to get a fresh key.")
                 st.stop()
 
         if not claims:
@@ -175,7 +179,7 @@ if uploaded_file and all_keys_ready:
         for i, claim_obj in enumerate(claims):
             claim_text = claim_obj.get("claim", "")
             if claim_text:
-                result = verify_claim(claim_text, claude_key, google_api_key, google_cx)
+                result = verify_claim(claim_text, gemini_key, google_api_key, google_cx)
                 result["category"] = claim_obj.get("category", "Other")
                 results.append(result)
             progress.progress((i + 1) / len(claims), text=f"Verified {i+1}/{len(claims)}")
